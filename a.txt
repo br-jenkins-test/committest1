@@ -14,6 +14,10 @@ hotfix
 ---
 test3
 feat2
+hotfix1
+hotfix2
+hotfix2
 
 ---- 
+feature
 feature
