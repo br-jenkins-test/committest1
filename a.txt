@@ -15,3 +15,4 @@ hotfix
 test3
 feat2
 hotfix1
+hotfix2
