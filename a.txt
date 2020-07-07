@@ -4,3 +4,8 @@ this is my second test
 this is a fix
 
 this happened during release
+
+---
+test2
+
+init
