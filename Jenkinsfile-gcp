@@ -1,0 +1,160 @@
+def definition = [
+	[
+		projectName: "br24-cms",
+		tests: [
+			[command: "yarn test", jUnitFileLocation: "/app/coverage/junit.xml"]
+		]
+	],
+]
+
+class TestableProject {
+	private String id
+	private TestHelper testHelper
+
+	TestableProject(id, testHelper) {
+		this.id = id
+		this.testHelper = testHelper
+	}
+
+	TestableProject execute(String command, Closure onSuccess) {
+		def id = "${this.testHelper.slug}-${this.id}-${this.testHelper.createRandomID()}-${this.testHelper.getBuildID()}"
+		def wasSuccessful = true
+
+		try {
+			try {
+				this.testHelper.shellScriptExecutor("docker run --name ${id} ${this.testHelper.getImageByID(this.id)} ${command}")
+				onSuccess(id, this)
+			} finally {
+				this.testHelper.shellScriptExecutor("docker rm ${id}")
+			}
+		} catch (err) {
+			this.testHelper.errorHandler("unable to execute ${command} (original error: ${err})")
+		}
+
+		return this
+	}
+
+	void captureJUnitResult(String containerID, String path) {
+		def fileName = this.testHelper.createRandomID()
+
+		this.testHelper.shellScriptExecutor("docker cp ${containerID}:${path} ./${fileName} && touch ${fileName}")
+		this.testHelper.junitCoverer(fileName)
+	}
+}
+
+class TestHelper {
+	String slug
+	private String buildID
+	private Map<String, String> images
+	Closure shellScriptExecutor
+	Closure junitCoverer
+	Closure errorHandler
+
+	String getImageByID(String id) {
+		return this.images[id]
+	}
+
+	TestHelper setSlug(String slug) {
+		this.slug = slug.replaceAll('/', '-')
+		return this
+	}
+
+	TestHelper setBuildID(String buildID) {
+		this.buildID = buildID
+		return this
+	}
+
+	String getBuildID() {
+		return this.buildID
+	}
+
+	TestHelper setImages(Map<String, String> images) {
+		this.images = images
+		return this
+	}
+
+	TestHelper setShellScriptExecutor(Closure shellScriptExecutor) {
+		this.shellScriptExecutor = shellScriptExecutor
+		return this
+	}
+
+	TestHelper setJUnitCoverer(Closure junitCoverer) {
+		this.junitCoverer = junitCoverer
+		return this
+	}
+
+	TestHelper setErrorHandler(Closure errorHandler) {
+		this.errorHandler = errorHandler
+		return this
+	}
+
+	String createRandomID() {
+		def haystack = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "A", "a", "B", "b", "C", "c", "D", "d", "E", "e", "F", "f", "G", "g", "H", "h", "I", "i", "J", "j", "K", "k", "L", "l", "M", "m", "N", "n", "O", "o", "P", "p", "Q", "q", "R", "r", "S", "s", "T", "t", "U", "u", "V", "v", "W", "w", "X", "x", "Y", "y", "Z", "z"]
+		Random rand = new Random()
+		String randomID = ""
+		int index = 0
+
+		for (index = 0; index < 32; index++) {
+			randomID = "${randomID}${haystack[rand.nextInt(haystack.size())]}"
+		}
+
+		return randomID
+	}
+
+	TestableProject createProject(String name) {
+		return new TestableProject(name, this)
+	}
+}
+
+node {
+	def pipeline = load('/pipeline/v9.groovy')
+
+	pipeline.start([
+		shadowbrokerVersion: "upgrade-hpa",
+		test: { images ->
+			def helper = new TestHelper()
+
+			helper
+				.setSlug(env.JOB_NAME)
+				.setImages(images)
+				.setBuildID(env.BUILD_NUMBER)
+				.setShellScriptExecutor({ command -> sh(command) })
+				.setJUnitCoverer({ fileName -> junit(testResults: fileName, allowEmptyResults: true) })
+				.setErrorHandler({ message -> error message })
+
+			def jobs = [:]
+			definition.each{ item ->
+				def project = helper.createProject(item.projectName)
+
+				jobs[item.projectName] = { ->
+					println "💩 and another one, get rekt ${item.projectName}"
+
+					item.tests.each{ test ->
+						project.execute(
+							test.command,
+							(test.jUnitFileLocation != null) ?
+								{ containerID, self ->
+									self.captureJUnitResult(containerID, test.jUnitFileLocation)
+								} :
+								{ -> })
+					}
+				}
+			}
+			parallel jobs
+		},
+
+		onError: { images, info ->
+			// https://jenkins.io/doc/book/pipeline/syntax/#flow-control
+			if ( env.BRANCH_NAME == "dev" || env.BRANCH_NAME == "testing" || env.BRANCH_NAME == "staging" || env.BRANCH_NAME == "master"  ) {
+				slackSend(channel: "#br24-web-updates", color:'danger', message:"Build ${env.BUILD_NUMBER} failed/aborted while being deployed to ${env.BRANCH_NAME} \n Changes: \n - ${env.BUILD_URL} \n - ${env.RUN_CHANGES_DISPLAY_URL}" )
+			}
+		},
+
+		onPostDeploy: { images, info ->
+			def hour = sh(script:"date +%H", returnStdout: true)  as int
+			if ( hour > 5 && (env.BRANCH_NAME == "staging" || env.BRANCH_NAME == "testing") ) {
+				slackSend(channel: "#br24de-qs", message:"Build ${env.BUILD_NUMBER} was successfully deployed to ${env.BRANCH_NAME} \n Changes: \n - ${env.BUILD_URL} \n - ${env.RUN_CHANGES_DISPLAY_URL}" )
+			}
+		}
+	])
+}
