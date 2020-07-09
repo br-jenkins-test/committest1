@@ -1,1 +1,24 @@
 this is my test
+this is my second test
+
+this is a fix
+
+this happened during release
+
+---
+test2
+
+init
+hotfix
+
+---
+test3
+feat2
+hotfix1
+hotfix2
+hotfix2
+
+---- 
+feature
+feature
+feature
