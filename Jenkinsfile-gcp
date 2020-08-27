@@ -141,6 +141,8 @@ node {
 				}
 			}
 			parallel jobs
+			
+			jiraSendBuildInfo site: 'testgarage.atlassian.net'
 		},
 
 		onError: { images, info ->
