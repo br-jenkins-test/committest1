@@ -1,0 +1,5 @@
+version: v10
+cloud: 'gcp'
+branches:
+- name: master
+ingresses:
