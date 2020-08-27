@@ -1,0 +1,8 @@
+
+version: v9
+cloud: 'gcp'
+images:
+- dummy
+branches:
+- name: master
+ingresses:
